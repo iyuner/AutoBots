@@ -1,0 +1,56 @@
+# pretrain, future_prediction
+stage: pretrain
+reformat: True
+
+# paras for pretrain
+mask_strategy: pointwise  # pointwise, patchwise, time-only
+mask_ratio: 0.75
+max_patch_size: 10        # used for patchwise
+min_patch_size: 5         # used for patchwise
+
+# train or eval
+task: train
+resume: False
+inter_occ: False
+
+# load checkpoint
+ckpt_path: None
+load_opz_epoch: False
+frozen_encoder: False
+
+
+# dataset
+dataset: Interaction
+dataset_path: [../datasets/interaction/v1_2/DR-multi-v1_2/]
+pos_emb_max_len: 150
+same_scale: False
+
+# wandb modes, online, offline, disabled
+wandb_mode: online
+
+# AutoBot model related
+decoder: AutoBotDecoder
+model_type: Autobot-Joint
+full_attention: False
+only_cal_ego_future_loss_in_join_model: False
+epochs: 500
+num_modes: 6
+batch_size: 128
+exp_id: test
+seed: 1
+hidden_size: 128
+tx_num_heads: 16
+num_encoder_layers: 2
+num_decoder_layers: 2
+dropout: 0.1 
+entropy_weight: 40.0 
+kl_weight: 20.0
+use_FDEADE_aux_loss: True
+use_map_lanes: True
+use_map_image: False # always false actually
+tx_hidden_size: 384
+learning_rate: 0.00046
+learning_rate_sched: [10, 20, 30, 40, 50]
+adam_epsilon: 0.0001
+grad_clip_norm: 5
+eval_every: 10

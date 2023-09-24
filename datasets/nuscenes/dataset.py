@@ -4,8 +4,6 @@ import os
 import numpy as np
 from torch.utils.data import Dataset
 from torchvision.transforms import transforms
-import warnings
-warnings.filterwarnings("ignore")
 
 
 class NuscenesH5Dataset(Dataset):
@@ -16,6 +14,7 @@ class NuscenesH5Dataset(Dataset):
         self.rtn_extras = rtn_extras
         self.use_map_img = use_map_img
         self.use_map_lanes = use_map_lanes
+        self.obs_horizon = 4
         self.pred_horizon = 12
         self.num_others = 7
         self.map_attr = 3
@@ -281,10 +280,11 @@ class NuscenesH5Dataset(Dataset):
 
         if self.use_joint_version:
             if self.rtn_extras:
-                extras = [dataset['translation'][idx], dataset['rotation'][idx], dataset['scene_ids'][idx][2].decode("utf-8")]
-                return in_ego, out_ego, in_agents, out_agents, roads, agent_types, extras, dataset['large_roads'][idx]
+                extras = [dataset['translation'][idx], dataset['rotation'][idx],
+                          dataset['scene_ids'][idx][0].decode("utf-8"), dataset['scene_ids'][idx][1].decode("utf-8")]
+                return in_ego, out_ego, in_agents, out_agents, roads, agent_types, extras
 
-            return in_ego, out_ego, in_agents, out_agents, roads, agent_types
+            return in_ego, out_ego, in_agents, out_agents, roads, agent_types #, raw_roads
         else:
             if self.use_map_lanes:
                 ego_roads = roads[0]

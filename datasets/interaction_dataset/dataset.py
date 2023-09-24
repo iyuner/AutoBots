@@ -11,7 +11,7 @@ from datasets.interaction_dataset.utils import LL2XYProjector, Point, get_type, 
 
 
 class InteractionDataset(Dataset):
-    def __init__(self, dset_path, split_name="train", evaluation=False, use_map_lanes=True):
+    def __init__(self, dset_path, split_name="train", evaluation=False, use_map_lanes=True, same_scale=True, occ = False):
         self.data_root = dset_path
         self.split_name = split_name
         self.pred_horizon = 15
@@ -37,10 +37,13 @@ class InteractionDataset(Dataset):
 
         self.max_num_agents = 0
         self.evaluation = evaluation
-        if not evaluation:
+        self.same_scale = same_scale
+        if not same_scale:
             self.num_others = 8  # train with 8 agents
         else:
             self.num_others = 40  # evaluate with 40 agents.
+
+        self.occ = occ
 
     def get_map_lanes(self, filename, lat_origin, lon_origin):
         projector = LL2XYProjector(lat_origin, lon_origin)
@@ -147,7 +150,7 @@ class InteractionDataset(Dataset):
         return relation_lanes[relation_lanes[:, :, -1].sum(1) > 0]
 
     def split_input_output_normalize(self, agents_data, meta_data, agent_types):
-        if self.evaluation:
+        if self.same_scale:
             in_horizon = 10
         else:
             in_horizon = 5
@@ -161,16 +164,23 @@ class InteractionDataset(Dataset):
         agent_masks[agent_masks == 0] = np.nan
         dists *= agent_masks[:, in_horizon - 1]
         dists *= agent_masks[:, in_horizon - 1].transpose()
-        ego_idx = np.random.randint(0, int(np.nansum(agent_masks[:, in_horizon - 1])))
+        if not self.occ:
+            ego_idx = np.random.randint(0, int(np.nansum(agent_masks[:, in_horizon - 1])))
+        else:
+            ego_idx = 0
         closest_agents = np.argsort(dists[ego_idx])
+        # print(closest_agents)
         agents_data = agents_data[closest_agents[:self.num_others + 1]]
         agent_types = agent_types[closest_agents[:self.num_others + 1]]
 
         agents_in = agents_data[1:(self.num_others + 1), :in_horizon]
-        agents_out = agents_data[1:(self.num_others + 1), in_horizon:, [0, 1, 4, 7]]  # returning positions and yaws
+        agents_out = agents_data[1:(self.num_others + 1), in_horizon:]#, [0, 1, 4, 7]]  # returning positions and yaws
         ego_in = agents_data[0, :in_horizon]
+        # print("ego_in.shape")
+        # print(ego_in.shape, ego_in)
+        # exit()
         ego_out = agents_data[0, in_horizon:]
-        ego_out = ego_out[:, [0, 1, 4, 7]]  # returning positions and yaws
+        # ego_out = ego_out[:, [0, 1, 4, 7]]  # returning positions and yaws
 
         return ego_in, ego_out, agents_in, agents_out, agent_types
 
@@ -212,17 +222,23 @@ class InteractionDataset(Dataset):
         new_ego_in[:, 3:] = ego_in
         new_ego_in[:, 2] = ego_in[:, 4] - ego_in[-1:, 4]  # standardized yaw.
 
-        new_ego_out = np.zeros((ego_out.shape[0], ego_out.shape[1] + 2))  # adding two dimensions for original positions
-        new_ego_out[:, 2:] = ego_out
-        new_ego_out[:, 4] -= ego_in[-1:, 4]  # standardized yaw.
+        new_ego_out = np.zeros((ego_out.shape[0], ego_out.shape[1] + 3))  # adding two dimensions for original positions
+        # new_ego_out[:, 2:] = ego_out
+        # new_ego_out[:, 4] -= new_ego_out[-1:, 4]  # standardized yaw.
+
+        new_ego_out[:, 3:] = ego_out
+        new_ego_out[:, 2] = ego_out[:, 4] - ego_out[-1:, 4]  # standardized yaw.
 
         new_agents_in = np.zeros((agents_in.shape[0], agents_in.shape[1], agents_in.shape[2] + 3))  # + 2
         new_agents_in[:, :, 3:] = agents_in
         new_agents_in[:, :, 2] = agents_in[:, :, 4] - agents_in[:, -1:, 4]  # standardized yaw.
 
-        new_agents_out = np.zeros((agents_out.shape[0], agents_out.shape[1], agents_out.shape[2] + 2))
-        new_agents_out[:, :, 2:] = agents_out
-        new_agents_out[:, :, 4] -= agents_in[:, -1:, 4]
+        new_agents_out = np.zeros((agents_out.shape[0], agents_out.shape[1], agents_out.shape[2] + 3))
+        # new_agents_out[:, :, 2:] = agents_out
+        # new_agents_out[:, :, 4] -= agents_in[:, -1:, 4]
+
+        new_agents_out[:, :, 3:] = agents_out
+        new_agents_out[:, :, 2] = agents_out[:, :, 4] - agents_out[:, -1:, 4]  # standardized yaw.
 
         new_roads = roads.copy()
 
@@ -292,7 +308,7 @@ class InteractionDataset(Dataset):
         agents_data = dataset['agents_trajectories'][idx]
         agent_types = dataset['agents_types'][idx]
         meta_data = dataset['metas'][idx]
-        if not self.evaluation:
+        if not self.same_scale:
             agents_data = agents_data[:, 1::2]  # downsampling for efficiency during training.
 
         road_fname_key = dataset['map_paths'][idx][0].decode("utf-8").split("/")[-1]
@@ -302,7 +318,6 @@ class InteractionDataset(Dataset):
         original_roads = np.zeros((self.max_num_road_segs, *roads.shape[1:]))
         original_roads[:len(roads)] = roads
         roads = original_roads.copy()
-
         ego_in, ego_out, agents_in, agents_out, agent_types = self.split_input_output_normalize(agents_data, meta_data,
                                                                                                 agent_types)
         roads = self.copy_agent_roads_across_agents(agents_in, roads)
@@ -312,7 +327,6 @@ class InteractionDataset(Dataset):
             translations = np.concatenate((ego_in[-1:, :2], agents_in[:, -1, :2]), axis=0)
         ego_in, ego_out, agents_in, agents_out, roads = self.rotate_agents(ego_in, ego_out, agents_in, agents_out,
                                                                            roads, agent_types)
-
         '''
         Outputs:
         ego_in: One agent we are calling ego who's shape is (T x S_i) where 
@@ -340,9 +354,9 @@ class InteractionDataset(Dataset):
                    agent_types, ego_in, agents_in.transpose(1, 0, 2), original_roads, translations
         else:
             # Experimentally found that global information actually hurts performance.
-            ego_in[:, 3:5] = 0.0
-            agents_in[:, :, 3:5] = 0.0
-            return ego_in, ego_out, agents_in.transpose(1, 0, 2), agents_out.transpose(1, 0, 2), roads, agent_types
+            # ego_in[:, 3:5] = 0.0
+            # agents_in[:, :, 3:5] = 0.0
+            return ego_in, ego_out, agents_in.transpose(1, 0, 2), agents_out.transpose(1, 0, 2), roads, agent_types, original_roads
 
     def __len__(self):
         return self.dset_len
